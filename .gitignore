@@ -1,0 +1,18 @@
+# Run artifacts
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+lppy.egg-info
+build/
+dist/
+
+# Test artifacts
+.coverage
+
+# IDE Configuration
+.idea
+.vscode
+
+# Documentation artefacts
+docs/_build/
