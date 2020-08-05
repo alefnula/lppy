@@ -1,212 +1,93 @@
+import queue
 import logging
-from typing import List, Optional
+import threading
+from typing import Union, Optional
 
 import rtmidi
 
+from lppy import errors
+from lppy.enums import Direction
 
 logger = logging.getLogger(__name__)
 
 
-class _Midi:
-    def __init__(self):
-        # exception handling moved to Midi()
-        # midi.init()
-        # but I can't remember why I put this one in here...
-        # midi.get_count()
-        pass
+class Device:
+    def __init__(self, midi: Union[rtmidi.MidiIn, rtmidi.MidiOut]):
+        self.midi = midi
 
-    def __del__(self):
-        # This will never be executed, because no one knows, how many Launchpad
-        # instances exist(ed) until we start to count them...
-        #
-        # midi.quit()
-        pass
+    @property
+    def is_open(self):
+        return self.midi is not None
 
-    @staticmethod
-    def search_devices(
-        name: str, output: bool = True, input: bool = True, quiet: bool = True
-    ) -> List[int]:
-        """Return a list of devices that match arguments.
+    def close(self):
+        self.midi.delete()
+        del self.midi
+        self.midi = None
 
-        Args:
-            name (str): Match by device name.
-            output (bool): Has outputs?
-            input (bool): Has inputs?
-            quiet (bool): Don't print any debugging messages.
 
-        Returns:
-            List[int]: List of device numbers.
-        """
-        result: List[int] = []
-        i = 0
+class InputDevice(Device):
+    def __init__(self, midi: rtmidi.MidiIn):
+        super().__init__(midi=midi)
+        self.__message_queue = queue.Queue()
+        self.__callback_queue = queue.Queue()
+        self.__callbacks = []
+        self.midi.set_callback(self.__callback)
+        self.__stop_event = threading.Event()
+        self.__thread = threading.Thread(
+            target=self.__handle_callbacks, daemon=True
+        )
+        self.__thread.start()
 
-        if output:
-            midi_out = rtmidi.MidiOut()
-            for port in midi_out.get_ports():
-                if not quiet:
-                    logger.info("Found output device: port=%s, 1, 0", port)
-                if port.lower().find(name.lower()) >= 0:
-                    result.append(i)
-                i += 1
+    def __callback(self, message, data=None):
+        self.__message_queue.put_nowait(message)
+        self.__callback_queue.put_nowait(message)
 
-        if input:
-            midi_in = rtmidi.MidiIn()
-            for port in midi_in.get_ports():
-                if not quiet:
-                    logger.info("Found input device: port=%s, 1, 0", port)
-                if port.lower().find(name.lower()) >= 0:
-                    result.append(i)
-                i += 1
+    def __handle_callbacks(self):
+        while not self.__stop_event.is_set():
+            try:
+                message = self.__callback_queue.get()
+                for callback in self.__callbacks:
+                    callback(message)
+            except Exception:
+                # FIXME: What can be raised?
+                pass
 
-        return result
+    def close(self):
+        self.__stop_event.set()
+        super().close()
 
-    def search_device(
-        self, name: str, output: bool = True, input: bool = True, n: int = 0
-    ) -> Optional[int]:
-        """Return the nth (default first) device that matches arguments.
-
-        By default it will return the first (n=0) device.
-
-        Args:
-            name (str): Match by device name.
-            output (bool): Has outputs?
-            input (bool): Has inputs?
-            n (int): Return nth device.
-
-        Returns:
-            Optional[int]: nth device (default first) if found else None.
-        """
-        result = self.search_devices(name, output, input)
-
-        if not 0 <= n < len(result):
+    def read(self):
+        """Get a single message."""
+        try:
+            return self.__message_queue.get_nowait()
+        except queue.Empty:
             return None
 
-        return result[n]
+    def flush(self):
+        """Remove all messages from the queue."""
+        with self.__message_queue.mutex:
+            self.__message_queue.queue.clear()
+        with self.__callback_queue.mutex:
+            self.__callback_queue.queue.clear()
+
+    def set_callback(self, callback):
+        if callback not in self.__callbacks:
+            self.__callbacks.append(callback)
+
+    def remove_callback(self, callback):
+        if callback in self.__callbacks:
+            self.__callbacks.remove(callback)
 
 
-class Midi:
-    """Midi singleton wrapper."""
+class OutputDevice(Device):
+    def __init__(self, midi: rtmidi.MidiOut):
+        super().__init__(midi=midi)
 
-    __instance = None
+    def send(self, stat, dat1, dat2):
+        """Send a single message."""
+        self.midi.send_message([stat, dat1, dat2])
 
-    def __init__(self):
-        """Allow only one instance to be created."""
-        if Midi.__instance is None:
-            try:
-                Midi.__instance = _Midi()
-            except Exception as e:
-                logger.error("Failed to initialize MIDI. Error: %s", e)
-                Midi.__instance = None
-
-        self.device_in = None
-        self.device_out = None
-
-    def __getattr__(self, name):
-        """Pass all unknown method calls to the instance of _Midi class."""
-        return getattr(self.__instance, name)
-
-    def output_open(self, midi_id: int) -> bool:
-        """Try to open an output device.
-
-        Args:
-            midi_id (int): ID of the midi device.
-
-        Returns:
-            bool: True if succeeded False otherwise.
-        """
-        if self.device_out is None:
-            try:
-                self.device_out = rtmidi.MidiOut()
-                self.device_out.open_port(midi_id)
-            except Exception as e:
-                logger.error(
-                    "Failed to open an output device: %s. Error: %s",
-                    midi_id,
-                    e,
-                )
-                self.device_out = None
-                return False
-        return True
-
-    def output_close(self):
-        if self.device_out is not None:
-            # self.devOut.close()
-            del self.device_out
-            self.device_out = None
-
-    def input_open(
-        self, midi_id: int, buffer_size: Optional[int] = None
-    ) -> bool:
-        """Try to open an output device.
-
-        Args:
-            midi_id (int): ID of the midi device.
-            buffer_size (int, optional): Size of the buffer.
-
-        Returns:
-            bool: True if succeeded False otherwise.
-        """
-        if self.device_in is None:
-            try:
-                # rtmidi's default size of the buffer is 1024.
-                self.device_in = (
-                    rtmidi.MidiIn()
-                    if buffer_size is None
-                    else rtmidi.MidiIn(queue_size_limit=buffer_size)
-                )
-                self.device_in.open_port(midi_id)
-            except Exception as e:
-                logger.error(
-                    "Failed to open an input device: %s. Error: %s",
-                    midi_id,
-                    e,
-                )
-                self.device_in = None
-                return False
-        return True
-
-    def input_close(self):
-        if self.device_in is not None:
-            self.device_in.close_port()
-            del self.device_in
-            self.device_in = None
-
-    def read_raw(self):
-        msg = self.device_in.get_message()
-        if msg != (None, None):
-            return msg
-        else:
-            return None
-
-    def write_raw(self, stat, dat1, dat2):
-        """Send a single, short message."""
-        self.device_out.send_message([stat, dat1, dat2])
-
-    def write_raw_multi(self, messages):
-        """Send a list of messages.
-
-        If timestamp is 0, it is ignored.
-        Amount of <dat> bytes is arbitrary.
-
-        Messages should be in the following format::
-
-            [
-                [
-                    [stat, <dat1>, <dat2>, <dat3>],
-                    timestamp
-                ],
-                [...],
-                ...
-            ]
-
-        <datN> fields are optional.
-
-        Args:
-            messages (list): List of messages.
-        """
-        self.device_out.send_message(messages)
-
-    def write_raw_sysex(self, messages, timestamp=0):
+    def send_sysex(self, messages):
         """Send a single system-exclusive message, given by list messages.
 
         The start (0xF0) and end bytes (0xF7) are added automatically.
@@ -215,6 +96,86 @@ class Midi:
 
             [ <dat1>, <dat2>, ..., <datN> ]
 
-        Timestamp is not supported and will be sent as '0' (for now)
         """
-        self.device_out.send_message([0xF0] + messages + [0xF7])
+        self.midi.send_message([0xF0] + messages + [0xF7])
+
+
+class Midi:
+    Direction = Direction
+
+    @staticmethod
+    def search_for_device(name: Optional[str], direction: Direction) -> bool:
+        """Search for a device by name and direction.
+
+        The device won't be opened.
+
+        Args:
+            name (str, optional): Partial match of the device name. If it's set
+                to ``None`` the return value will be ``None``.
+            direction (Direction): Is it an input or output device.
+
+        Returns:
+            bool: ``True`` if the device is found ``False`` otherwise.
+        """
+        if direction == Direction.input:
+            midi = rtmidi.MidiIn()
+        elif direction == Direction.output:
+            midi = rtmidi.MidiOut()
+        else:
+            raise errors.LaunchpadError(
+                message=f"Invalid direction value: {direction}",
+                code=errors.ErrorCode.value_error,
+            )
+
+        for i, port in enumerate(midi.get_ports()):
+            if port.lower().find(name.lower()) != -1:
+                midi.delete()
+                del midi
+                return True
+
+        midi.delete()
+        del midi
+        return False
+
+    @staticmethod
+    def open_device(
+        name: Optional[str], direction: Direction
+    ) -> Optional[Union[InputDevice, OutputDevice]]:
+        """Open an input device by it's partial name match.
+
+        Args:
+            name (str, optional): Partial match of the device name. If it's set
+                to ``None`` the return value will be ``None``.
+            direction (Direction): Is it an input or output device.
+
+        Returns:
+            Optional[Union[rtmidi.MidiIn, rtmidi.MidiOut]]: Instance of a
+                ``MidiIn`` or ``MidiOut`` class if appropriate device is found
+                or ``None`` if the device is not found or the name is not
+                provided.
+        """
+        if name is None:
+            return None
+
+        if direction == Direction.input:
+            midi = rtmidi.MidiIn()
+            error_class = errors.InputDeviceNotFound
+            wrapper_class = InputDevice
+        elif direction == Direction.output:
+            midi = rtmidi.MidiOut()
+            error_class = errors.OutputDeviceNotFound
+            wrapper_class = OutputDevice
+        else:
+            raise errors.LaunchpadError(
+                message=f"Invalid direction value: {direction}",
+                code=errors.ErrorCode.value_error,
+            )
+
+        for i, port in enumerate(midi.get_ports()):
+            if port.lower().find(name.lower()) != -1:
+                midi.open_port(i)
+                return wrapper_class(midi)
+
+        midi.delete()
+        del midi
+        raise error_class(name)
