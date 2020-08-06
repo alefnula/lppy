@@ -18,7 +18,7 @@ def get_version():
 
 setup(
     name="lppy",
-    version=io.open("lppy/version.py"),
+    version=get_version(),
     author=author,
     author_email=author_email,
     maintainer=author,
