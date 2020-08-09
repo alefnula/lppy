@@ -107,8 +107,8 @@ class LaunchpadPro(LaunchpadBase):
     #        |   |2/9|   |   |   |   |   |   |         9
     #        +---+---+---+---+---+---+---+---+
     #
-    INPUT_NAME = "Pro"
-    OUTPUT_NAME = "Pro"
+    INPUT_NAME = ("Pro", 0)
+    OUTPUT_NAME = ("Pro", 0)
 
     class Layout(enum.Enum):
         session = 0x00

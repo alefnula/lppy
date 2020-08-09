@@ -64,8 +64,8 @@ class LaunchpadMiniMk3(LaunchpadPro):
 
     # 	COLORS = {'black':0, 'off':0, 'white':3, 'red':5, 'green':17 }
 
-    INPUT_NAME = "Launchpad Mini MK3 LPMiniMK3 MIDI Out"
-    OUTPUT_NAME = "Launchpad Mini MK3 LPMiniMK3 MIDI In"
+    INPUT_NAME = ("Launchpad Mini MK3", 1)
+    OUTPUT_NAME = ("Launchpad Mini MK3", 1)
 
     class Layout(enum.Enum):
         session = 0x00

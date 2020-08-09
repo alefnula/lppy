@@ -1,7 +1,7 @@
 import queue
 import logging
 import threading
-from typing import Union, Optional
+from typing import Union, Optional, Tuple
 
 import rtmidi
 
@@ -139,7 +139,7 @@ class Midi:
 
     @staticmethod
     def open_device(
-        name: Optional[str], direction: Direction
+        name: Optional[Tuple[str, int]], direction: Direction
     ) -> Optional[Union[InputDevice, OutputDevice]]:
         """Open an input device by it's partial name match.
 
@@ -171,10 +171,15 @@ class Midi:
                 code=errors.ErrorCode.value_error,
             )
 
+        # FIXME: Hack!
+        name, no = name
+        found = -1
         for i, port in enumerate(midi.get_ports()):
             if port.lower().find(name.lower()) != -1:
-                midi.open_port(i)
-                return wrapper_class(midi)
+                found += 1
+                if found == no:
+                    midi.open_port(i)
+                    return wrapper_class(midi)
 
         midi.delete()
         del midi

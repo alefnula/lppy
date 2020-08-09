@@ -61,8 +61,8 @@ class Launchpad(LaunchpadBase):
     # +---+---+---+---+---+---+---+---+  +---+
     #
 
-    INPUT_NAME = "Launchpad"
-    OUTPUT_NAME = "Launchpad"
+    INPUT_NAME = ("Launchpad", 0)
+    OUTPUT_NAME = ("Launchpad", 0)
 
     def led_all_on(self, color: Color = Color.black):
         """All LEDs on.

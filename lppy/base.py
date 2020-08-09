@@ -1,13 +1,13 @@
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from lppy.enums import Color, RGB, Scroll
 from lppy.midi import Midi, InputDevice, OutputDevice
 
 
 class LaunchpadBase:
-    INPUT_NAME: Optional[str] = None
-    OUTPUT_NAME: Optional[str] = None
+    INPUT_NAME: Optional[Tuple[str, int]] = None
+    OUTPUT_NAME: Optional[Tuple[str, int]] = None
 
     Color = Color
     RGB = RGB
