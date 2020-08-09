@@ -85,10 +85,10 @@ class Launchpad(LaunchpadBase):
 
         NOTE: In here, number is 0..7 (left..right).
         """
-        red = min(color.red, 3)  # make int and limit to <=3
+        red = min(color.r, 3)  # make int and limit to <=3
         red = max(red, 0)  # no negative numbers
 
-        green = min(int(color.green), 3)  # make int and limit to <=3
+        green = min(int(color.g), 3)  # make int and limit to <=3
         green = max(green, 0)  # no negative numbers
 
         led = 0

@@ -130,26 +130,14 @@ class LaunchpadMiniMk3(LaunchpadPro):
                 raise errors.LEDSelectionError(n=n, x=x, y=y)
 
             self.output.send_sysex(
-                [0, 32, 41, 2, 13, 3, 3, n, color.red, color.green, color.blue]
+                [0, 32, 41, 2, 13, 3, 3, n, color.r, color.g, color.b]
             )
         elif x is not None and y is not None:
             if x < 0 or x > 9 or y < 0 or y > 9:
                 raise errors.LEDSelectionError(n=n, x=x, y=y)
             led = 90 - (10 * y) + x
             self.output.send_sysex(
-                [
-                    0,
-                    32,
-                    41,
-                    2,
-                    13,
-                    3,
-                    3,
-                    led,
-                    color.red,
-                    color.green,
-                    color.blue,
-                ]
+                [0, 32, 41, 2, 13, 3, 3, led, color.r, color.g, color.b]
             )
         else:
             raise errors.LEDSelectionError(n=n, x=x, y=y)

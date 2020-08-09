@@ -96,7 +96,7 @@ class LaunchpadBase:
         string: str,
         color: RGB,
         scroll: Scroll = Scroll.none,
-        wait_ms=150,
+        wait_ms=100,
     ):
         """Scroll string with color."""
         if scroll == Scroll.left:
