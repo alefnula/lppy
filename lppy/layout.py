@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Callable
 from dataclasses import dataclass
 
+from lppy.midi import Message
 from lppy.enums import RGB, ButtonState, Scroll
 from lppy.models.launchpad import LaunchpadBase
 
@@ -161,15 +162,16 @@ class Layout:
         for button in self.layout.values():
             button.turn_on()
 
-    def callback(self, msg):
+    def callback(self, msg: Message):
         try:
-            if msg[0][0] == 144 and msg[0][2] == 127:
-                button_no = msg[0][1]
-                if button_no == 19:
-                    self.reset()
-                else:
-                    button = self.layout.get(button_no, None)
-                    if button is not None:
-                        button.execute()
+            if msg.off:
+                return
+
+            if msg.n == 19:
+                self.reset()
+            else:
+                button = self.layout.get(msg.n, None)
+                if button is not None:
+                    button.execute()
         except Exception as e:
-            print(e)
+            print(f"Failed to execute button: {msg.n}. Error: {e}")

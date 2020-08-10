@@ -1,3 +1,4 @@
+import enum
 import queue
 import logging
 import threading
@@ -9,6 +10,32 @@ from lppy import errors
 from lppy.enums import Direction
 
 logger = logging.getLogger(__name__)
+
+
+class Message:
+    class State(str, enum.Enum):
+        off = "off"
+        on = "on"
+
+    def __init__(self, n: int, intensity: int = 0, diff: float = 0.0):
+        # FIXME: Only for MK3
+        self.state = self.State.on if intensity == 127 else self.State.off
+        self.n = n
+        self.intensity = intensity
+        self.diff = diff
+
+    def __str__(self):
+        return f"Message(state={self.state}, n={self.n})"
+
+    __repr__ = __str__
+
+    @property
+    def on(self):
+        return self.state == self.State.on
+
+    @property
+    def off(self):
+        return self.state == self.State.off
 
 
 class Device:
@@ -39,8 +66,12 @@ class InputDevice(Device):
         self.__thread.start()
 
     def __callback(self, message, data=None):
-        self.__message_queue.put_nowait(message)
-        self.__callback_queue.put_nowait(message)
+        ((code, n, intensity), diff) = message
+        # FIXME: This is only for MK3 need info about other Launchpads
+        if code in (144, 176):
+            msg = Message(n=n, intensity=intensity, diff=diff)
+            self.__message_queue.put_nowait(msg)
+            self.__callback_queue.put_nowait(msg)
 
     def __handle_callbacks(self):
         while not self.__stop_event.is_set():
