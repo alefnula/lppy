@@ -104,7 +104,7 @@ class LaunchpadMiniMk3(LaunchpadPro):
         """Selects the Mk3's mode."""
         self.output.send_sysex([0, 32, 41, 2, 13, 14, mode.value])
 
-    def led_all_on(self, color: Color = Color.black):
+    def led_all_on(self, color: Color):
         """Quickly sets all all LEDs to the same color."""
         # TODO: Maybe the SysEx was indeed a better idea :)
         #       Did some tests:

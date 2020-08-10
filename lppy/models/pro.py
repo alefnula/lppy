@@ -139,7 +139,7 @@ class LaunchpadPro(LaunchpadBase):
         """Selects the Pro's mode."""
         self.output.send_sysex([0, 32, 41, 2, 16, 33, mode.value])
 
-    def led_all_on(self, color: Color = Color.black):
+    def led_all_on(self, color: Color):
         """Quickly sets all all LEDs to the same color."""
         self.output.send_sysex([0, 32, 41, 2, 16, 14, color.value])
 

@@ -12,9 +12,9 @@ def create_parser():
     return parser
 
 
-def cli(args):
+def cli():
     parser = create_parser()
-    ns = parser.parse_args(args)
+    ns = parser.parse_args(sys.argv[1:])
 
     launchpad = LaunchpadMiniMk3()
     layout = Layout(path=ns.layout, launchpad=launchpad)
@@ -24,4 +24,4 @@ def cli(args):
 
 
 if __name__ == "__main__":
-    cli(sys.argv[1:])
+    cli()

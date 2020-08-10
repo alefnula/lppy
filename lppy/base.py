@@ -51,14 +51,7 @@ class LaunchpadBase:
         """
         self.input.flush()
 
-    def reset(self):
-        """Reset the Launchpad.
-
-        Turns off all LEDs.
-        """
-        self.led_all_on(color=Color.black)
-
-    def led_all_on(self, color: Color = Color.black):
+    def led_all_on(self, color: Color):
         """All LEDs on.
 
         Args:
@@ -66,6 +59,10 @@ class LaunchpadBase:
                 turn LEDs off.
         """
         raise NotImplementedError()
+
+    def led_all_off(self):
+        """Turn off all leds."""
+        self.led_all_on(color=Color.black)
 
     def led_on(
         self,
