@@ -27,6 +27,13 @@ class ButtonState(str, enum.Enum):
     err = "err"
     no_change = "no_change"
 
+    def __invert__(self) -> "ButtonState":
+        if self == self.on:
+            return self.off
+        elif self == self.off:
+            return self.on
+        return self
+
 
 @dataclass
 class RGB:

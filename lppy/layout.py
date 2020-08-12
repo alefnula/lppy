@@ -3,12 +3,22 @@ import json
 import inspect
 import importlib
 from pathlib import Path
+from functools import partial
 from typing import Optional, Callable
 from dataclasses import dataclass
 
 from lppy.midi import Message
 from lppy.enums import RGB, ButtonState, Scroll
 from lppy.models.launchpad import LaunchpadBase
+
+
+@dataclass
+class Result:
+    char: Optional[str] = None
+    text: Optional[str] = None
+    color: RGB = RGB(r=255)
+    scroll: Scroll = Scroll.none
+    wait_ms: int = 1000
 
 
 class Callback:
@@ -36,14 +46,15 @@ class Callback:
                 return True
         return False
 
-    def __call__(self):
+    def __call__(self) -> Result:
         try:
             if self.need_button:
-                self.callback(self.button)
+                return self.callback(self.button)
             else:
-                self.callback()
+                return self.callback()
         except Exception as e:
             print("Error running callback:", e)
+            return Result()
 
 
 class Button:
@@ -51,36 +62,38 @@ class Button:
 
     def __init__(
         self,
-        lp: LaunchpadBase,
+        led_on: partial,
         n: int,
         action: str,
         color_on: RGB,
-        color_off: RGB = RGB(),
-        color_err: RGB = RGB(r=255),
+        color_off: RGB = RGB(),  # black / turned off
+        color_err: RGB = RGB(r=255),  # red
+        initial_state: ButtonState = ButtonState.off,
     ):
         """Create a button.
 
         Args:
-            lp: Instance of a launchpad used.
+            led_on: Function for turnging the led on.
             n: Button number.
             action: String path to the callback.
             color_on: Button on color.
             color_off: Button off color.
             color_err: Button error color.
+            initial_state: Initial button state.
         """
-        self.lp = lp
         self.n = n
         self.action = action
-        self.state = ButtonState.off
+        self.state = initial_state
         self.color_on = color_on
         self.color_off = color_off
         self.color_err = color_err
+        self._led_on = led_on
         self.callback = Callback(action=action, button=self)
 
     @classmethod
-    def from_dict(cls, lp: LaunchpadBase, d: dict) -> "Button":
+    def from_dict(cls, led_on: partial, d: dict) -> "Button":
         button = cls(
-            lp=lp,
+            led_on=led_on,
             n=d["n"],
             action=d["action"],
             color_on=RGB.parse(d["color_on"]),
@@ -88,42 +101,36 @@ class Button:
         )
         if "color_err" in d:
             button.color_err = RGB.parse(d["color_err"])
+        if "initial_state" in d:
+            button.state = ButtonState(d["initial_state"])
+
         return button
 
-    def turn_on(self):
-        if self.state == ButtonState.on:
-            self.lp.led_on(self.color_on, n=self.n)
-        elif self.state == ButtonState.off:
-            self.lp.led_on(self.color_off, n=self.n)
-        elif self.state == ButtonState.err:
-            self.lp.led_on(self.color_off, n=self.n)
+    @property
+    def on(self):
+        return self.state == ButtonState.on
 
-    def turn_off(self):
-        self.lp.led_on(RGB(), n=self.n)
+    @property
+    def off(self):
+        return self.state == ButtonState.off
+
+    def led_on(self):
+        if self.state == ButtonState.on:
+            self._led_on(self.color_on)
+        elif self.state == ButtonState.off:
+            self._led_on(self.color_off)
+        elif self.state == ButtonState.err:
+            self._led_on(self.color_off)
+
+    def led_off(self):
+        self._led_on(RGB())
 
     def set_state(self, state: ButtonState):
         self.state = state
-        self.turn_on()
+        self.led_on()
 
-    def execute(self):
-        self.callback()
-
-
-@dataclass
-class Result:
-    state: ButtonState
-    text: Optional[str] = None
-    text_color: RGB = RGB(r=255)
-    scroll: Scroll = Scroll.left
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Result":
-        result = cls(state=ButtonState(d["state"]), text=d.get("text", None))
-        if "text_color" in d:
-            result.text_color = RGB.parse(d["text_color"])
-        if "scroll" in d:
-            result.scroll = Scroll(d["scroll"])
-        return result
+    def execute(self) -> Result:
+        return self.callback()
 
 
 class Layout:
@@ -147,31 +154,52 @@ class Layout:
         # Load layout
         self.layout = {}
         for button_data in data["layout"]:
-            button = Button.from_dict(lp=self.launchpad, d=button_data)
+            n = button_data["n"]
+            button = Button.from_dict(
+                led_on=partial(self.launchpad.led_on, n=n), d=button_data,
+            )
             self.layout[button.n] = button
 
         self.reset()
 
         self.launchpad.input.set_callback(self.callback)
 
-    def reset(self):
-        # Reset all leds
-        self.launchpad.led_all_off()
+    def reset(self, other_led_off=True):
+
+        if other_led_off:
+            # Reset all leds
+            self.launchpad.led_all_off()
 
         # Put all buttons in the off state
         for button in self.layout.values():
-            button.turn_on()
+            button.led_on()
 
     def callback(self, msg: Message):
         try:
             if msg.off:
                 return
 
-            if msg.n == 19:
-                self.reset()
-            else:
-                button = self.layout.get(msg.n, None)
-                if button is not None:
-                    button.execute()
+            button = self.layout.get(msg.n, None)
+            if button is not None:
+                result = button.execute()
+                if result is None:
+                    return
+
+                if result.char is not None:
+                    self.launchpad.write_char(
+                        char=result.char, color=result.color
+                    )
+                    self.reset(other_led_off=False)
+                elif result.text:
+                    self.launchpad.write_string(
+                        string=result.text,
+                        color=result.color,
+                        scroll=result.scroll,
+                        wait_ms=result.wait_ms,
+                    )
+                    self.reset()
+                else:
+                    self.reset()
+
         except Exception as e:
             print(f"Failed to execute button: {msg.n}. Error: {e}")

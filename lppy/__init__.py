@@ -6,6 +6,7 @@ __all__ = [
     "RGB",
     "Color",
     "Scroll",
+    "Result",
     "Button",
     "ButtonState",
     "Layout",
@@ -14,4 +15,4 @@ __all__ = [
 from lppy.midi import Message
 from lppy.models import Launchpad, LaunchpadPro, LaunchpadMiniMk3
 from lppy.enums import RGB, Color, Scroll
-from lppy.layout import Button, ButtonState, Layout
+from lppy.layout import Result, Button, ButtonState, Layout
