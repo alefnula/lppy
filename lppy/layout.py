@@ -12,6 +12,16 @@ from lppy.enums import RGB, ButtonState, Scroll
 from lppy.models.launchpad import LaunchpadBase
 
 
+def get_callable(path: str) -> Optional[Callable]:
+    try:
+        module_name, callable_name = path.split(":")
+        module = importlib.import_module(module_name)
+        return getattr(module, callable_name)
+    except Exception as e:
+        print("Error while importing callable:", e)
+        return None
+
+
 @dataclass
 class Result:
     char: Optional[str] = None
@@ -25,18 +35,8 @@ class Callback:
     def __init__(self, action: str, button: "Button"):
         self.action = action
         self.button = button
-        self.callback = self.__get_callback(action)
+        self.callback = get_callable(action)
         self.need_button = self.__need_button(self.callback)
-
-    @staticmethod
-    def __get_callback(action: str) -> Optional[Callable]:
-        try:
-            module_name, callback_name = action.split(":")
-            module = importlib.import_module(module_name)
-            return getattr(module, callback_name)
-        except Exception as e:
-            print("Error while importing callback:", e)
-            return None
 
     @staticmethod
     def __need_button(callable) -> bool:
@@ -69,6 +69,7 @@ class Button:
         color_off: RGB = RGB(),  # black / turned off
         color_err: RGB = RGB(r=255),  # red
         initial_state: ButtonState = ButtonState.off,
+        state_func: Optional[str] = None,
     ):
         """Create a button.
 
@@ -80,10 +81,17 @@ class Button:
             color_off: Button off color.
             color_err: Button error color.
             initial_state: Initial button state.
+            state_func: String path to the callable that will return the
+                initial button state.
         """
         self.n = n
         self.action = action
-        self.state = initial_state
+        self.state_func = (
+            None if state_func is None else get_callable(state_func)
+        )
+        self.state = (
+            initial_state if self.state_func is None else self.state_func()
+        )
         self.color_on = color_on
         self.color_off = color_off
         self.color_err = color_err
@@ -92,17 +100,22 @@ class Button:
 
     @classmethod
     def from_dict(cls, led_on: partial, d: dict) -> "Button":
+        color_err = RGB.parse(d.get("color_err", "#FF0000"))
+        initial_state = ButtonState(
+            d.get("initial_state", ButtonState.off.value)
+        )
+        state_func = d.get("state_func", None)
+
         button = cls(
             led_on=led_on,
             n=d["n"],
             action=d["action"],
             color_on=RGB.parse(d["color_on"]),
             color_off=RGB.parse(d["color_off"]),
+            color_err=color_err,
+            initial_state=initial_state,
+            state_func=state_func,
         )
-        if "color_err" in d:
-            button.color_err = RGB.parse(d["color_err"])
-        if "initial_state" in d:
-            button.state = ButtonState(d["initial_state"])
 
         return button
 
