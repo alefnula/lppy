@@ -1,41 +1,16 @@
-import enum
 import queue
 import logging
 import threading
-from typing import Union, Optional, Tuple
+from collections import defaultdict
+from typing import Union, Optional, Tuple, Callable
 
 import rtmidi
 
 from lppy import errors
 from lppy.enums import Direction
+from lppy.message import Message, Action
 
 logger = logging.getLogger(__name__)
-
-
-class Message:
-    class State(str, enum.Enum):
-        off = "off"
-        on = "on"
-
-    def __init__(self, n: int, intensity: int = 0, diff: float = 0.0):
-        # FIXME: Only for MK3
-        self.state = self.State.on if intensity == 127 else self.State.off
-        self.n = n
-        self.intensity = intensity
-        self.diff = diff
-
-    def __str__(self):
-        return f"Message(state={self.state}, n={self.n})"
-
-    __repr__ = __str__
-
-    @property
-    def on(self):
-        return self.state == self.State.on
-
-    @property
-    def off(self):
-        return self.state == self.State.off
 
 
 class Device:
@@ -57,7 +32,7 @@ class InputDevice(Device):
         super().__init__(midi=midi)
         self.__message_queue = queue.Queue()
         self.__callback_queue = queue.Queue()
-        self.__callbacks = []
+        self.__callbacks = defaultdict(list)
         self.midi.set_callback(self.__callback)
         self.__stop_event = threading.Event()
         self.__thread = threading.Thread(
@@ -67,9 +42,22 @@ class InputDevice(Device):
 
     def __callback(self, message, data=None):
         ((code, n, intensity), diff) = message
-        # FIXME: This is only for MK3 need info about other Launchpads
-        if code in (144, 176):
-            msg = Message(n=n, intensity=intensity, diff=diff)
+        if intensity == 0:
+            # Intensity == 0 generates two messages release and click
+            msg1 = Message(
+                Action.release, code=code, n=n, intensity=intensity, diff=diff,
+            )
+            msg2 = Message(
+                Action.click, code=code, n=n, intensity=intensity, diff=diff,
+            )
+            self.__message_queue.put_nowait(msg1)
+            self.__message_queue.put_nowait(msg2)
+            self.__callback_queue.put_nowait(msg1)
+            self.__callback_queue.put_nowait(msg2)
+        else:
+            msg = Message(
+                Action.press, code=code, n=n, intensity=intensity, diff=diff,
+            )
             self.__message_queue.put_nowait(msg)
             self.__callback_queue.put_nowait(msg)
 
@@ -77,7 +65,7 @@ class InputDevice(Device):
         while not self.__stop_event.is_set():
             try:
                 message = self.__callback_queue.get()
-                for callback in self.__callbacks:
+                for callback in self.__callbacks.get(message.action, []):
                     callback(message)
             except Exception:
                 # FIXME: What can be raised?
@@ -101,13 +89,17 @@ class InputDevice(Device):
         with self.__callback_queue.mutex:
             self.__callback_queue.queue.clear()
 
-    def set_callback(self, callback):
-        if callback not in self.__callbacks:
-            self.__callbacks.append(callback)
+    def set_callback(
+        self, action: Action, callback: Callable[[Message], None]
+    ):
+        if callback not in self.__callbacks[action]:
+            self.__callbacks[action].append(callback)
 
-    def remove_callback(self, callback):
-        if callback in self.__callbacks:
-            self.__callbacks.remove(callback)
+    def remove_callback(
+        self, action: Action, callback: Callable[[Message], None]
+    ):
+        if callback in self.__callbacks[action]:
+            self.__callbacks[action].remove(callback)
 
 
 class OutputDevice(Device):

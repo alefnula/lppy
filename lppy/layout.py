@@ -1,6 +1,7 @@
 import sys
 import json
 import inspect
+import logging
 import importlib
 from pathlib import Path
 from functools import partial
@@ -12,13 +13,16 @@ from lppy.enums import RGB, ButtonState, Scroll
 from lppy.models.launchpad import LaunchpadBase
 
 
+logger = logging.getLogger(__name__)
+
+
 def get_callable(path: str) -> Optional[Callable]:
     try:
         module_name, callable_name = path.split(":")
         module = importlib.import_module(module_name)
         return getattr(module, callable_name)
     except Exception as e:
-        print("Error while importing callable:", e)
+        logger.error("Error while importing callable: %s", e)
         return None
 
 
@@ -32,28 +36,30 @@ class Result:
 
 
 class Callback:
-    def __init__(self, action: str, button: "Button"):
-        self.action = action
+    def __init__(self, command: str, button: "Button"):
+        self.command = command
         self.button = button
-        self.callback = get_callable(action)
-        self.need_button = self.__need_button(self.callback)
-
-    @staticmethod
-    def __need_button(callable) -> bool:
+        self.callback = get_callable(command)
+        # Inspect callback parameters
+        self.parameters = {}
         sig = inspect.signature(callable)
         for parameter in sig.parameters.values():
-            if parameter.annotation is Button:
-                return True
-        return False
+            self.parameters[parameter.name] = parameter.annotation
 
-    def __call__(self) -> Result:
+    def __create_kwargs(self, message: Message) -> dict:
+        kwargs = {}
+        for name, dtype in self.parameters.items():
+            if dtype == Message:
+                kwargs[name] = message
+            elif dtype == Button:
+                kwargs[name] = self.button
+        return kwargs
+
+    def __call__(self, message: Message) -> Result:
         try:
-            if self.need_button:
-                return self.callback(self.button)
-            else:
-                return self.callback()
+            return self.callback(**self.__create_kwargs(message=message))
         except Exception as e:
-            print("Error running callback:", e)
+            logger.error("Error running callback: %s", e)
             return Result()
 
 
@@ -63,8 +69,9 @@ class Button:
     def __init__(
         self,
         led_on: partial,
+        action: Message.Action,
         n: int,
-        action: str,
+        command: str,
         color_on: RGB,
         color_off: RGB = RGB(),  # black / turned off
         color_err: RGB = RGB(r=255),  # red
@@ -74,9 +81,10 @@ class Button:
         """Create a button.
 
         Args:
-            led_on: Function for turnging the led on.
+            led_on: Function for turning the led on.
+            action: Type of action that this button should respond to.
             n: Button number.
-            action: String path to the callback.
+            command: String path to the callback.
             color_on: Button on color.
             color_off: Button off color.
             color_err: Button error color.
@@ -84,8 +92,9 @@ class Button:
             state_func: String path to the callable that will return the
                 initial button state.
         """
-        self.n = n
         self.action = action
+        self.n = n
+        self.command = command
         self.state_func = (
             None if state_func is None else get_callable(state_func)
         )
@@ -96,7 +105,7 @@ class Button:
         self.color_off = color_off
         self.color_err = color_err
         self._led_on = led_on
-        self.callback = Callback(action=action, button=self)
+        self.callback = Callback(command=command, button=self)
 
     @classmethod
     def from_dict(cls, led_on: partial, d: dict) -> "Button":
@@ -108,8 +117,9 @@ class Button:
 
         button = cls(
             led_on=led_on,
+            action=Message.Action(d.get("action", Message.Action.click)),
             n=d["n"],
-            action=d["action"],
+            command=d["command"],
             color_on=RGB.parse(d["color_on"]),
             color_off=RGB.parse(d["color_off"]),
             color_err=color_err,
@@ -142,8 +152,8 @@ class Button:
         self.state = state
         self.led_on()
 
-    def execute(self) -> Result:
-        return self.callback()
+    def execute(self, message: Message) -> Result:
+        return self.callback(message=message)
 
 
 class Layout:
@@ -175,10 +185,13 @@ class Layout:
 
         self.reset()
 
-        self.launchpad.input.set_callback(self.callback)
+        self.launchpad.input.set_callback(Message.Action.click, self.callback)
+        self.launchpad.input.set_callback(Message.Action.press, self.callback)
+        self.launchpad.input.set_callback(
+            Message.Action.release, self.callback
+        )
 
     def reset(self, other_led_off=True):
-
         if other_led_off:
             # Reset all leds
             self.launchpad.led_all_off()
@@ -187,14 +200,11 @@ class Layout:
         for button in self.layout.values():
             button.led_on()
 
-    def callback(self, msg: Message):
+    def callback(self, message: Message):
         try:
-            if msg.off:
-                return
-
-            button = self.layout.get(msg.n, None)
-            if button is not None:
-                result = button.execute()
+            button = self.layout.get(message.n, None)
+            if button is not None and button.action == message.action:
+                result = button.execute(message=message)
                 if result is None:
                     return
 
@@ -215,4 +225,6 @@ class Layout:
                     self.reset()
 
         except Exception as e:
-            print(f"Failed to execute button: {msg.n}. Error: {e}")
+            logger.error(
+                "Failed to execute button: %s. Error: %s", message.n, e
+            )
