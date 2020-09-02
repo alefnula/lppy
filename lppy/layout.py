@@ -2,11 +2,13 @@ import sys
 import json
 import inspect
 import logging
-import importlib
 from pathlib import Path
+from copy import deepcopy
 from functools import partial
 from typing import Optional, Callable
 from dataclasses import dataclass
+
+from tea.utils import get_object
 
 from lppy.midi import Message
 from lppy.enums import RGB, ButtonState, Scroll
@@ -18,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 def get_callable(path: str) -> Optional[Callable]:
     try:
-        module_name, callable_name = path.split(":")
-        module = importlib.import_module(module_name)
-        return getattr(module, callable_name)
+        obj_path, name = path.split(":")
+        obj = get_object(obj_path)
+        return getattr(obj, name)
     except Exception as e:
-        logger.error("Error while importing callable: %s", e)
+        logger.exception("Error while importing callable: %s", e)
         return None
 
 
@@ -36,18 +38,19 @@ class Result:
 
 
 class Callback:
-    def __init__(self, command: str, button: "Button"):
+    def __init__(self, command: str, args: dict, button: "Button"):
         self.command = command
+        self.args = args
         self.button = button
         self.callback = get_callable(command)
         # Inspect callback parameters
         self.parameters = {}
-        sig = inspect.signature(callable)
+        sig = inspect.signature(self.callback)
         for parameter in sig.parameters.values():
             self.parameters[parameter.name] = parameter.annotation
 
     def __create_kwargs(self, message: Message) -> dict:
-        kwargs = {}
+        kwargs = deepcopy(self.args)
         for name, dtype in self.parameters.items():
             if dtype == Message:
                 kwargs[name] = message
@@ -59,7 +62,7 @@ class Callback:
         try:
             return self.callback(**self.__create_kwargs(message=message))
         except Exception as e:
-            logger.error("Error running callback: %s", e)
+            logger.exception("Error running callback: %s", e)
             return Result()
 
 
@@ -71,12 +74,14 @@ class Button:
         led_on: partial,
         action: Message.Action,
         n: int,
-        command: str,
         color_on: RGB,
         color_off: RGB = RGB(),  # black / turned off
         color_err: RGB = RGB(r=255),  # red
         initial_state: ButtonState = ButtonState.off,
+        command: str = "",
+        command_args: Optional[dict] = None,
         state_func: Optional[str] = None,
+        state_func_args: Optional[dict] = None,
     ):
         """Create a button.
 
@@ -84,50 +89,54 @@ class Button:
             led_on: Function for turning the led on.
             action: Type of action that this button should respond to.
             n: Button number.
-            command: String path to the callback.
             color_on: Button on color.
             color_off: Button off color.
             color_err: Button error color.
             initial_state: Initial button state.
+            command: String path to the callback.
+            command_args: Dictionary of additional arguments for command
+                function.
             state_func: String path to the callable that will return the
                 initial button state.
+            state_func_args: Dictionary of additional arguments for the state
+                function.
         """
         self.action = action
         self.n = n
-        self.command = command
-        self.state_func = (
-            None if state_func is None else get_callable(state_func)
-        )
-        self.state = (
-            initial_state if self.state_func is None else self.state_func()
-        )
         self.color_on = color_on
         self.color_off = color_off
         self.color_err = color_err
         self._led_on = led_on
-        self.callback = Callback(command=command, button=self)
+        self.state_func = (
+            None if state_func is None else get_callable(state_func)
+        )
+        self.state_func_args = state_func_args or {}
+        self.state = (
+            initial_state
+            if self.state_func is None
+            else self.state_func(**self.state_func_args)
+        )
+        self.callback = Callback(
+            command=command, args=command_args or {}, button=self
+        )
 
     @classmethod
     def from_dict(cls, led_on: partial, d: dict) -> "Button":
-        color_err = RGB.parse(d.get("color_err", "#FF0000"))
-        initial_state = ButtonState(
-            d.get("initial_state", ButtonState.off.value)
-        )
-        state_func = d.get("state_func", None)
-
-        button = cls(
+        return cls(
             led_on=led_on,
             action=Message.Action(d.get("action", Message.Action.click)),
             n=d["n"],
-            command=d["command"],
             color_on=RGB.parse(d["color_on"]),
             color_off=RGB.parse(d["color_off"]),
-            color_err=color_err,
-            initial_state=initial_state,
-            state_func=state_func,
+            color_err=RGB.parse(d.get("color_err", "#FF0000")),
+            initial_state=ButtonState(
+                d.get("initial_state", ButtonState.off.value)
+            ),
+            command=d["command"],
+            command_args=d.get("command_args", None),
+            state_func=d.get("state_func", None),
+            state_func_args=d.get("state_func_args", None),
         )
-
-        return button
 
     @property
     def on(self):
