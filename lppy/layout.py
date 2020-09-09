@@ -111,6 +111,13 @@ class Button:
             None if state_func is None else get_callable(state_func)
         )
         self.state_func_args = state_func_args or {}
+        # Add button to state func args if needed
+        if state_func is not None:
+            sig = inspect.signature(self.callback)
+            for parameter in sig.parameters.values():
+                if parameter.annotation == Button:
+                    self.state_func_args[parameter.name] = self
+                    break
         self.state = (
             initial_state
             if self.state_func is None
