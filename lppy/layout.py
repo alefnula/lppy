@@ -112,8 +112,8 @@ class Button:
         )
         self.state_func_args = state_func_args or {}
         # Add button to state func args if needed
-        if state_func is not None:
-            sig = inspect.signature(self.callback)
+        if self.state_func is not None:
+            sig = inspect.signature(self.state_func)
             for parameter in sig.parameters.values():
                 if parameter.annotation == Button:
                     self.state_func_args[parameter.name] = self
